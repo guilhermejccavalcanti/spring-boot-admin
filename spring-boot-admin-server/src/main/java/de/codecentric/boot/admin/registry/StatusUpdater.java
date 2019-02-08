@@ -16,15 +16,12 @@
 package de.codecentric.boot.admin.registry;
 
 import java.util.Map;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.ApplicationEventPublisherAware;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
-
 import de.codecentric.boot.admin.event.ClientApplicationStatusChangedEvent;
 import de.codecentric.boot.admin.model.Application;
 import de.codecentric.boot.admin.model.StatusInfo;
@@ -37,74 +34,70 @@ import de.codecentric.boot.admin.registry.store.ApplicationStore;
  * @author Johannes Stelzer
  */
 public class StatusUpdater implements ApplicationEventPublisherAware {
-	private static final Logger LOGGER = LoggerFactory.getLogger(StatusUpdater.class);
 
-	private final ApplicationStore store;
-	private final RestTemplate restTemplate;
-	private ApplicationEventPublisher publisher;
+    private static final Logger LOGGER = LoggerFactory.getLogger(StatusUpdater.class);
 
-	/**
+    private final ApplicationStore store;
+
+    private final RestTemplate restTemplate;
+
+    private ApplicationEventPublisher publisher;
+
+    /**
 	 * Lifetime of status in ms. The status won't be updated as long the last status isn't expired.
 	 */
-	private long statusLifetime = 30_000L;
+    private long statusLifetime = 30_000L;
 
-	public StatusUpdater(RestTemplate restTemplate, ApplicationStore store) {
-		this.restTemplate = restTemplate;
-		this.store = store;
-	}
+    public StatusUpdater(RestTemplate restTemplate, ApplicationStore store) {
+        this.restTemplate = restTemplate;
+        this.store = store;
+    }
 
-	public void updateStatusForAllApplications() {
-		long now = System.currentTimeMillis();
-		for (Application application : store.findAll()) {
-			if (now - statusLifetime > application.getStatusInfo().getTimestamp()) {
-				updateStatus(application);
-			}
-		}
-	}
+    public void updateStatusForAllApplications() {
+        long now = System.currentTimeMillis();
+        for (Application application : store.findAll()) {
+            if (now - statusLifetime > application.getStatusInfo().getTimestamp()) {
+                updateStatus(application);
+            }
+        }
+    }
 
-	public void updateStatus(Application application) {
-		StatusInfo oldStatus = application.getStatusInfo();
-		StatusInfo newStatus = queryStatus(application);
+    public void updateStatus(Application application) {
+        StatusInfo oldStatus = application.getStatusInfo();
+        StatusInfo newStatus = queryStatus(application);
+        Application newState = Application.create(application).withStatusInfo(newStatus).build();
+        store.save(newState);
+        if (!newStatus.equals(oldStatus)) {
+            publisher.publishEvent(new ClientApplicationStatusChangedEvent(newState, oldStatus, newStatus));
+        }
+    }
 
-		Application newState = Application.create(application).withStatusInfo(newStatus).build();
-		store.save(newState);
+    private StatusInfo queryStatus(Application application) {
+        LOGGER.trace("Updating status for {}", application);
+        try {
+            @SuppressWarnings(value = { "unchecked" }) ResponseEntity<Map<String, Object>> response = restTemplate.getForEntity(application.getHealthUrl(), (Class<Map<String, Object>>) (Class<?>) Map.class);
+            LOGGER.debug("/health for {} responded with {}", application, response);
+            if (response.hasBody() && response.getBody().get("status") instanceof String) {
+                return StatusInfo.valueOf((String) response.getBody().get("status"));
+            } else {
+                if (response.getStatusCode().is2xxSuccessful()) {
+                    return StatusInfo.ofUp();
+                } else {
+                    return StatusInfo.ofDown();
+                }
+            }
+        } catch (Exception ex) {
+            LOGGER.warn("Couldn\'t retrieve status for {}", application, ex);
+            return StatusInfo.ofOffline();
+        }
+    }
 
-		if (!newStatus.equals(oldStatus)) {
-			publisher.publishEvent(new ClientApplicationStatusChangedEvent(newState, oldStatus,
-					newStatus));
-		}
-	}
+    public void setStatusLifetime(long statusLifetime) {
+        this.statusLifetime = statusLifetime;
+    }
 
-	private StatusInfo queryStatus(Application application) {
-		LOGGER.trace("Updating status for {}", application);
-
-		try {
-			@SuppressWarnings("unchecked")
-			ResponseEntity<Map<String, String>> response = restTemplate.getForEntity(
-					application.getHealthUrl(), (Class<Map<String, String>>) (Class<?>) Map.class);
-			LOGGER.debug("/health for {} responded with {}", application, response);
-
-			if (response.hasBody() && response.getBody().get("status") != null) {
-				return StatusInfo.valueOf(response.getBody().get("status"));
-			} else if (response.getStatusCode().is2xxSuccessful()) {
-				return StatusInfo.ofUp();
-			} else {
-				return StatusInfo.ofDown();
-			}
-
-		} catch (RestClientException ex) {
-			LOGGER.warn("Couldn't retrieve status for {}", application, ex);
-			return StatusInfo.ofOffline();
-		}
-	}
-
-	public void setStatusLifetime(long statusLifetime) {
-		this.statusLifetime = statusLifetime;
-	}
-
-	@Override
-	public void setApplicationEventPublisher(ApplicationEventPublisher publisher) {
-		this.publisher = publisher;
-	}
-
+    @Override
+    public void setApplicationEventPublisher(ApplicationEventPublisher publisher) {
+        this.publisher = publisher;
+    }
 }

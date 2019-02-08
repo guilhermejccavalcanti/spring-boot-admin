@@ -3,12 +3,20 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>de.codecentric</groupId>
   <artifactId>spring-boot-admin-sample-war</artifactId>
+<<<<<<< HEAD
   <version>1.3.0-SNAPSHOT</version>
+=======
+  <version>1.2.5-SNAPSHOT</version>
+>>>>>>> 6967ddd5
   <packaging>war</packaging>
   <parent>
     <groupId>de.codecentric</groupId>
     <artifactId>spring-boot-admin-samples</artifactId>
+<<<<<<< HEAD
     <version>1.3.0-SNAPSHOT</version>
+=======
+    <version>1.2.5-SNAPSHOT</version>
+>>>>>>> 6967ddd5
     <relativePath>..</relativePath>
   </parent>
   <dependencies>
